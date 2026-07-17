@@ -4,14 +4,16 @@ on:
   push:
     branches: [main]
 
-env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/task-api
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set image name (lowercase)
+        run: |
+          OWNER=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE=ghcr.io/${OWNER}/task-api" >> "$GITHUB_ENV"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
