@@ -7,4 +7,7 @@ FastAPI task manager
 
 **Автор**: Mikhail N
 **Начало работы**: 2026-07-10
-77
+
+## Живой сервис
+
+Документация и swagger: https://176-108-248-151.nip.io/docs
