@@ -44,7 +44,7 @@ jobs:
             docker run -d \
               --name task-api \
               --restart unless-stopped \
-              -p 80:8000 \
+              -p 127.0.0.1:8000:8000 \
               -e LOG_LEVEL=INFO \
               ${{ env.IMAGE }}:latest
             docker logout ghcr.io
