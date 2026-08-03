@@ -17,22 +17,51 @@ FEATURE_ORDER = [
     "od280/od315_of_diluted_wines", "proline",
 ]
 
-def _build_gradio_demo(model) -> gr.Interface:
+def _build_gradio_demo(model) -> gr.Blocks:
+    default_values = [13.5, 1.8, 2.4, 18.0, 105.0, 2.7, 2.9, 0.28, 1.85, 5.5, 1.05, 3.2, 1180.0]
+
+    # Три предзаполненных примера — по одному для каждого класса.
+    # Числа взяты из реальных строк датасета load_wine.
+    examples = [
+        [13.50, 1.81, 2.61, 20.0, 96.0, 2.53, 2.61, 0.28, 1.66, 3.52, 1.12, 3.82, 845],   # class_0 typical
+        [12.37, 0.94, 1.36, 10.6, 88.0, 1.98, 0.57, 0.28, 0.42, 1.95, 1.05, 1.82, 520],   # class_1 typical
+        [13.71, 5.65, 2.45, 20.5, 95.0, 1.68, 0.61, 0.52, 1.06, 7.70, 0.64, 1.74, 740],   # class_2 typical
+    ]
+
     def predict_wine(*features):
         row = pd.DataFrame([dict(zip(FEATURE_ORDER, features))])[FEATURE_ORDER]
         proba = model.predict_proba(row)[0]
         return {CLASS_NAMES[i]: float(p) for i, p in enumerate(proba)}
 
-    return gr.Interface(
-        fn=predict_wine,
-        inputs=[gr.Number(label=name, value=v) for name, v in zip(
-            FEATURE_ORDER,
-            [13.5, 1.8, 2.4, 18.0, 105.0, 2.7, 2.9, 0.28, 1.85, 5.5, 1.05, 3.2, 1180.0],
-        )],
-        outputs=gr.Label(label="Распределение вероятностей"),
-        title="🍷 Wine classifier",
-        description="Введите 13 показателей лабораторного анализа партии",
-    )
+    with gr.Blocks(title="Wine classifier") as demo:
+        gr.Markdown(
+            "# 🍷 Wine classifier\n"
+            "ML-эндпоинт: по 13 химическим показателям партии вина определяет сорт винограда. "
+            "Можно ввести значения вручную или нажать на один из примеров под формой."
+        )
+
+        with gr.Row():
+            with gr.Column(scale=2):
+                gr.Markdown("### Вход — химический анализ партии")
+                inputs = [
+                    gr.Number(label=name, value=v)
+                    for name, v in zip(FEATURE_ORDER, default_values)
+                ]
+                submit = gr.Button("Предсказать сорт", variant="primary")
+
+            with gr.Column(scale=1):
+                gr.Markdown("### Выход — предсказание модели")
+                output = gr.Label(label="Распределение вероятностей по классам")
+
+        gr.Examples(
+            examples=examples,
+            inputs=inputs,
+            label="Примеры партий (клик заполняет поля)",
+        )
+
+        submit.click(fn=predict_wine, inputs=inputs, outputs=output)
+
+    return demo
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
