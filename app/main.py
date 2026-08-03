@@ -1,107 +1,50 @@
-import logging
+from contextlib import asynccontextmanager
+from pathlib import Path
 
-from app.core.config import settings
-from app.core.logging import setup_logging
+import joblib
+import pandas as pd
+from fastapi import FastAPI, Request
 
-setup_logging(settings.log_level)
-logger = logging.getLogger(__name__)
+from app.schemas.predict import PredictRequest, PredictResponse
 
+MODEL_PATH = Path("models/wine_model.pkl")
+CLASS_NAMES = ["class_0", "class_1", "class_2"]
+FEATURE_ORDER = [
+    "alcohol", "malic_acid", "ash", "alcalinity_of_ash", "magnesium",
+    "total_phenols", "flavanoids", "nonflavanoid_phenols",
+    "proanthocyanins", "color_intensity", "hue",
+    "od280/od315_of_diluted_wines", "proline",
+]
 
-
-
-
-from fastapi import FastAPI, HTTPException, status
-from pydantic import BaseModel, Field
-import asyncio
-
-app = FastAPI(
-    title=settings.app_name,
-    version=settings.app_version,
-    debug=settings.debug,
-)
-
-
-class TaskCreate(BaseModel):
-    title: str = Field(min_length=1, max_length=200)
-    description: str = Field(default="", max_length=2000)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Грузим модель один раз при старте
+    app.state.model = joblib.load(MODEL_PATH)
+    yield
+    # Тут можно было бы закрыть коннекшены к БД, но у нас их нет
 
 
-class Task(BaseModel):
-    id: int
-    title: str
-    description: str
-    done: bool = False
-
-
-class TaskUpdate(BaseModel):
-    title: str | None = Field(default=None, min_length=1, max_length=200)
-    description: str | None = Field(default=None, max_length=2000)
-    done: bool | None = None
-
-
-tasks: dict[int, Task] = {}
-next_id: int = 1
-
+app = FastAPI(lifespan=lifespan)
 
 @app.get("/health")
-async def health():
-    logger.info("health check called")
+def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.post("/predict", response_model=PredictResponse)
+def predict(req: PredictRequest, request: Request) -> PredictResponse:
+    model = request.app.state.model
 
-@app.post("/tasks", response_model=Task)
-async def create_task(payload: TaskCreate):
-    global next_id
-    task = Task(
-        id=next_id,
-        title=payload.title,
-        description=payload.description,
-        done=False,
+    # Превращаем Pydantic-объект в DataFrame с теми же именами колонок,
+    # которые модель видела на обучении. by_alias=True вернёт
+    # оригинальное имя od280/od315_of_diluted_wines со слэшем.
+    row = pd.DataFrame([req.model_dump(by_alias=True)])
+    row = row[FEATURE_ORDER]
+
+    proba = model.predict_proba(row)[0]
+    pred_idx = int(proba.argmax())
+
+    return PredictResponse(
+        predicted_class=CLASS_NAMES[pred_idx],
+        probabilities={CLASS_NAMES[i]: float(round(p, 4)) for i, p in enumerate(proba)},
     )
-    tasks[task.id] = task
-    next_id += 1
-    return task
-
-
-@app.get("/tasks", response_model=list[Task])
-async def list_tasks():
-    return list(tasks.values())
-
-
-@app.get("/tasks/{task_id}", response_model=Task)
-async def get_task(task_id: int):
-    task = tasks.get(task_id)
-    if task is None:
-        raise HTTPException(status_code=404, detail="task not found")
-    return task
-
-
-@app.patch("/tasks/{task_id}", response_model=Task)
-async def update_task(task_id: int, payload: TaskUpdate):
-    task = tasks.get(task_id)
-    if task is None:
-        raise HTTPException(status_code=404, detail="task not found")
-    updated = task.model_copy(
-        update={k: v for k, v in payload.model_dump().items() if v is not None}
-    )
-    tasks[task_id] = updated
-    return updated
-
-
-@app.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_task(task_id: int):
-    if task_id not in tasks:
-        raise HTTPException(status_code=404, detail="task not found")
-    del tasks[task_id]
-    return None
-
-
-@app.get("/slow")
-async def slow_endpoint():
-    await asyncio.sleep(1)
-    return {"message": "done"}
-
-@app.get("/version")
-async def version() -> dict[str, str]:
-    return {"version": settings.app_version}
