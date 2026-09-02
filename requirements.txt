@@ -17,3 +17,6 @@ joblib==1.4.2
 
 # UI
 gradio==5.50.0
+
+# LLM (OpenRouter)
+langchain-openai>=0.2.0

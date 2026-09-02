@@ -8,4 +8,7 @@ services:
     environment:                    # переменные окружения для приложения внутри контейнера
       LOG_LEVEL: ${LOG_LEVEL:-INFO}   # значение из окружения хоста, по умолчанию INFO
       DEBUG: ${DEBUG:-false}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openai/gpt-4o-mini}
     restart: unless-stopped         # если контейнер упал — Docker сам перезапустит (но не если вы остановили его руками)
