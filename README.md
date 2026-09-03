@@ -35,7 +35,7 @@ pip install -r requirements.txt
 # модель уже в models/wine_model.pkl; при необходимости переобучите ноутбуком
 # и скопируйте: cp wine-train/wine_model.pkl models/
 
-cp .env.example .env   # при необходимости задай OPENROUTER_API_KEY
+cp .env.example .env   # задай LLM_API_KEY (обязательно)
 uvicorn app.main:app --reload
 ```
 

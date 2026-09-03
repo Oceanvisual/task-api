@@ -1,104 +1,214 @@
+import time
 from contextlib import asynccontextmanager
-from pathlib import Path
 
-import gradio as gr  
-import joblib
-import pandas as pd
-from fastapi import FastAPI, Request
+import gradio as gr
+from fastapi import FastAPI, HTTPException
 
-from app.schemas.predict import PredictRequest, PredictResponse
+from app.rag.chain import build_rag_chain
+from app.schemas.chat import ChatRequest, ChatResponse, Source
 
-MODEL_PATH = Path("models/wine_model.pkl")
-CLASS_NAMES = ["class_0", "class_1", "class_2"]
-FEATURE_ORDER = [
-    "alcohol", "malic_acid", "ash", "alcalinity_of_ash", "magnesium",
-    "total_phenols", "flavanoids", "nonflavanoid_phenols",
-    "proanthocyanins", "color_intensity", "hue",
-    "od280/od315_of_diluted_wines", "proline",
+_chain = None
+_retriever = None
+
+# LaTeX delimiters для Gradio Chatbot. LLM-ответы про Ridge, Lasso, метрики
+# содержат формулы $$..$$ / \[..\] / $..$ — без этого блока они отрисуются
+# как сырые строки `$\ell_1$`.
+LATEX_DELIMITERS = [
+    {"left": "$$", "right": "$$", "display": True},
+    {"left": "\\[", "right": "\\]", "display": True},
+    {"left": "$", "right": "$", "display": False},
+    {"left": "\\(", "right": "\\)", "display": False},
 ]
 
-def _build_gradio_demo(model) -> gr.Blocks:
-    default_values = [13.5, 1.8, 2.4, 18.0, 105.0, 2.7, 2.9, 0.28, 1.85, 5.5, 1.05, 3.2, 1180.0]
-
-    # Три предзаполненных примера — по одному для каждого класса.
-    # Числа взяты из реальных строк датасета load_wine.
-    examples = [
-        [13.50, 1.81, 2.61, 20.0, 96.0, 2.53, 2.61, 0.28, 1.66, 3.52, 1.12, 3.82, 845],   # class_0 typical
-        [12.37, 0.94, 1.36, 10.6, 88.0, 1.98, 0.57, 0.28, 0.42, 1.95, 1.05, 1.82, 520],   # class_1 typical
-        [13.71, 5.65, 2.45, 20.5, 95.0, 1.68, 0.61, 0.52, 1.06, 7.70, 0.64, 1.74, 740],   # class_2 typical
-    ]
-
-    def predict_wine(*features):
-        row = pd.DataFrame([dict(zip(FEATURE_ORDER, features))])[FEATURE_ORDER]
-        proba = model.predict_proba(row)[0]
-        return {CLASS_NAMES[i]: float(p) for i, p in enumerate(proba)}
-
-    with gr.Blocks(title="Wine classifier") as demo:
-        gr.Markdown(
-            "# 🍷 Wine classifier\n"
-            "ML-эндпоинт: по 13 химическим показателям партии вина определяет сорт винограда. "
-            "Можно ввести значения вручную или нажать на один из примеров под формой."
-        )
-
-        with gr.Row():
-            with gr.Column(scale=2):
-                gr.Markdown("### Вход — химический анализ партии")
-                inputs = [
-                    gr.Number(label=name, value=v)
-                    for name, v in zip(FEATURE_ORDER, default_values)
-                ]
-                submit = gr.Button("Предсказать сорт", variant="primary")
-
-            with gr.Column(scale=1):
-                gr.Markdown("### Выход — предсказание модели")
-                output = gr.Label(label="Распределение вероятностей по классам")
-
-        gr.Examples(
-            examples=examples,
-            inputs=inputs,
-            label="Примеры партий (клик заполняет поля)",
-        )
-
-        submit.click(fn=predict_wine, inputs=inputs, outputs=output)
-
-    return demo
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Грузим модель один раз при старте
-    app.state.model = joblib.load(MODEL_PATH)
+    global _chain, _retriever
+    _chain, _retriever = build_rag_chain()
+    print("RAG chain ready")
     yield
-    # Тут можно было бы закрыть коннекшены к БД, но у нас их нет
+    _chain = None
+    _retriever = None
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(title="RAG service", lifespan=lifespan)
+
 
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/predict", response_model=PredictResponse)
-def predict(req: PredictRequest, request: Request) -> PredictResponse:
-    model = request.app.state.model
+@app.post("/chat", response_model=ChatResponse)
+def chat(payload: ChatRequest) -> ChatResponse:
+    docs = _retriever.invoke(payload.question)
+    try:
+        answer = _chain.invoke(payload.question)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"LLM provider temporarily unavailable. "
+                f"Try again in 30-60 seconds. Raw: {type(exc).__name__}"
+            ),
+        ) from exc
+    sources = [
+        Source(
+            url=doc.metadata.get("source", "unknown"),
+            snippet=doc.page_content[:200].strip(),
+        )
+        for doc in docs
+    ]
+    return ChatResponse(answer=answer, sources=sources)
 
-    # Превращаем Pydantic-объект в DataFrame с теми же именами колонок,
-    # которые модель видела на обучении. by_alias=True вернёт
-    # оригинальное имя od280/od315_of_diluted_wines со слэшем.
-    row = pd.DataFrame([req.model_dump(by_alias=True)])
-    row = row[FEATURE_ORDER]
 
-    proba = model.predict_proba(row)[0]
-    pred_idx = int(proba.argmax())
+def _format_timings(retrieval_ms: float, llm_ms: float | None, llm_error: str | None) -> str:
+    lines = [
+        "### ⏱ Тайминги последнего запроса",
+        "",
+        f"- 🔍 **Retrieval (embed + Qdrant):** {retrieval_ms:.0f} ms",
+    ]
+    if llm_ms is not None:
+        lines.append(f"- 🤖 **LLM call:** {llm_ms:.0f} ms")
+        lines.append(f"- 📊 **Total:** {retrieval_ms + llm_ms:.0f} ms")
+    else:
+        lines.append(f"- 🤖 **LLM call:** ❌ {llm_error}")
+    return "\n".join(lines)
 
-    return PredictResponse(
-        predicted_class=CLASS_NAMES[pred_idx],
-        probabilities={CLASS_NAMES[i]: float(round(p, 4)) for i, p in enumerate(proba)},
+
+def _format_sources(docs: list) -> str:
+    if not docs:
+        return "### 📚 Источники\n\n_Ничего не найдено_"
+    lines = ["### 📚 Источники", ""]
+    for i, doc in enumerate(docs, 1):
+        source = doc.metadata.get("source", "unknown")
+        snippet = doc.page_content[:140].strip().replace("\n", " ")
+        lines.append(f"**[{i}]** `{source}`")
+        lines.append(f"> {snippet}…")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def respond(message: str, history: list):
+    """Streaming Gradio handler — generator that yields on every chunk."""
+    if not message or not message.strip():
+        yield history, "", "### ⏱ Тайминги\n\n_Пустой запрос_", "### 📚 Источники\n\n_—_"
+        return
+
+    history = history + [{"role": "user", "content": message}]
+
+    t0 = time.perf_counter()
+    docs = _retriever.invoke(message)
+    retrieval_ms = (time.perf_counter() - t0) * 1000
+    sources_panel = _format_sources(docs)
+
+    # Yield #1: sources уже на экране, LLM ещё не начал писать.
+    history.append({"role": "assistant", "content": ""})
+    yield (
+        history, "",
+        "### ⏱ Тайминги\n\n"
+        f"- 🔍 **Retrieval:** {retrieval_ms:.0f} ms\n"
+        "- 🤖 **LLM:** _streaming…_",
+        sources_panel,
     )
 
+    t1 = time.perf_counter()
+    ttft_ms: float | None = None
+    accumulated = ""
+    try:
+        for chunk in _chain.stream(message):
+            if not chunk:
+                continue
+            if ttft_ms is None:
+                ttft_ms = (time.perf_counter() - t1) * 1000
+            accumulated += chunk
+            history[-1]["content"] = accumulated
+            yield (
+                history, "",
+                f"### ⏱ Тайминги\n\n"
+                f"- 🔍 **Retrieval:** {retrieval_ms:.0f} ms\n"
+                f"- ⚡ **TTFT (1st token):** {ttft_ms:.0f} ms\n"
+                f"- 🤖 **LLM:** _streaming… {len(accumulated)} chars_",
+                sources_panel,
+            )
+
+        llm_total_ms = (time.perf_counter() - t1) * 1000
+        yield (
+            history, "",
+            "### ⏱ Тайминги последнего запроса\n\n"
+            f"- 🔍 **Retrieval:** {retrieval_ms:.0f} ms\n"
+            f"- ⚡ **TTFT:** {ttft_ms:.0f} ms\n"
+            f"- 🤖 **LLM stream (full):** {llm_total_ms:.0f} ms\n"
+            f"- 📊 **Total:** {retrieval_ms + llm_total_ms:.0f} ms",
+            sources_panel,
+        )
+    except Exception as exc:
+        history[-1]["content"] = (
+            f"⚠️ LLM-провайдер сейчас недоступен ({type(exc).__name__}). "
+            f"Попробуй через 30-60 секунд."
+        )
+        yield (
+            history, "",
+            _format_timings(retrieval_ms, None, type(exc).__name__),
+            sources_panel,
+        )
 
 
-# Gradio-демо собирается при импорте, использует модель через замыкание.
-_model = joblib.load(MODEL_PATH)
-demo = _build_gradio_demo(_model)
+# CSS делает три вещи: 1) распахивает контейнер на всю ширину,
+# 2) фиксирует высоту чата и боковой панели на calc(100vh - 220px) —
+#    минус headers — чтобы при наборе сообщения чат НЕ сжимался,
+# 3) добавляет видимую границу между чатом и боковой панелью.
+CSS = """
+.gradio-container { max-width: 100% !important; padding: 1rem !important; }
+#chatbot { height: calc(100vh - 220px) !important; min-height: 500px !important; }
+#side-panel { height: calc(100vh - 220px) !important; overflow-y: auto !important;
+              padding: 1rem !important; border-left: 1px solid #ddd !important; }
+"""
+
+with gr.Blocks(
+    title="scikit-learn docs RAG",
+    css=CSS,
+    fill_height=True,
+    theme=gr.themes.Soft(),
+) as demo:
+    gr.Markdown(
+        "# 📖 scikit-learn docs RAG assistant\n"
+        "_Спрашивай про Linear models, Decision trees, Metrics — на русском или английском._"
+    )
+    with gr.Row():
+        with gr.Column(scale=3):
+            chatbot = gr.Chatbot(
+                elem_id="chatbot",
+                type="messages",
+                latex_delimiters=LATEX_DELIMITERS,
+                show_copy_button=True,
+                avatar_images=(None, None),
+            )
+            with gr.Row():
+                msg = gr.Textbox(
+                    placeholder="Например: «Покажи формулу Ridge» или «Чем precision отличается от recall»",
+                    scale=8,
+                    container=False,
+                    autofocus=True,
+                )
+                send = gr.Button("Отправить", scale=1, variant="primary")
+            gr.Examples(
+                examples=[
+                    "How does Ridge regression work?",
+                    "Что ты умеешь?",
+                    "Объясни разницу между precision и recall с формулами",
+                    "When does a decision tree overfit?",
+                ],
+                inputs=msg,
+            )
+        with gr.Column(scale=1, elem_id="side-panel"):
+            timings_md = gr.Markdown(
+                "### ⏱ Тайминги последнего запроса\n\n_Задайте вопрос, чтобы увидеть тайминги._"
+            )
+            sources_md = gr.Markdown("### 📚 Источники\n\n_—_")
+
+    msg.submit(respond, [msg, chatbot], [chatbot, msg, timings_md, sources_md])
+    send.click(respond, [msg, chatbot], [chatbot, msg, timings_md, sources_md])
+
+
 app = gr.mount_gradio_app(app, demo, path="/")

@@ -1,14 +1,38 @@
 services:
-  api:                              # имя сервиса; если бы добавляли БД, тут была бы вторая запись db:
-    build: .                        # собирать из Dockerfile в текущей папке
-    image: task-api:latest          # имя собранного образа; latest — стандартный тег "самая свежая"
-    container_name: task-api        # фиксированное имя контейнера, чтобы было удобно адресовать в docker logs/stop
+  api:
+    build: .
+    image: task-api:latest
+    container_name: task-api
     ports:
-      - "8000:8000"                 # слева — порт ноутбука, справа — порт внутри контейнера. Кавычки обязательны
-    environment:                    # переменные окружения для приложения внутри контейнера
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}   # значение из окружения хоста, по умолчанию INFO
-      DEBUG: ${DEBUG:-false}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
-      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openai/gpt-4o-mini}
-    restart: unless-stopped         # если контейнер упал — Docker сам перезапустит (но не если вы остановили его руками)
+      - "8000:8000"
+    environment:
+      LLM_API_KEY: ${LLM_API_KEY:?LLM_API_KEY is required}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://openrouter.ai/api/v1}
+      LLM_MODEL: ${LLM_MODEL:-meta-llama/llama-3.3-70b-instruct}
+      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.0}
+      QDRANT_URL: http://qdrant:6333
+      COLLECTION_NAME: ${COLLECTION_NAME:-sklearn_docs}
+      TOP_K: ${TOP_K:-4}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-small}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-384}
+      NORMALIZE_EMBEDDINGS: ${NORMALIZE_EMBEDDINGS:-true}
+    networks:
+      - mentoring-net
+    depends_on:
+      - qdrant
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.0
+    container_name: qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - ./qdrant_data:/qdrant/storage
+    networks:
+      - mentoring-net
+    restart: unless-stopped
+
+networks:
+  mentoring-net:
+    name: mentoring-net

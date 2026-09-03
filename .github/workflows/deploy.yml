@@ -1,11 +1,36 @@
-name: Deploy
+name: CI/CD
 
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest tests/ -v
+        env:
+          # Только секрет. Остальное (base URL, model, top_k, эмбеддер) —
+          # дефолты из app/config.py, общие для CI / локали / прода.
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          QDRANT_URL: http://localhost:6333
+
   deploy:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,20 +56,25 @@ jobs:
             ${{ env.IMAGE }}:${{ github.sha }}
             ${{ env.IMAGE }}:latest
 
-      - name: Deploy to server
+      - name: Deploy to VPS
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.SERVER_HOST }}
+          host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
+            set -e
+            cd /opt/mentoring/rag-service
+
+            # Только секреты. Имя модели, base URL, top_k и т.д.
+            # — дефолты из app/config.py.
+            cat > .env << EOF
+            LLM_API_KEY=${{ secrets.LLM_API_KEY }}
+            QDRANT_URL=http://qdrant:6333
+            EOF
+
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             docker pull ${{ env.IMAGE }}:latest
-            docker rm -f task-api 2>/dev/null || true
-            docker run -d \
-              --name task-api \
-              --restart unless-stopped \
-              -p 127.0.0.1:8000:8000 \
-              -e LOG_LEVEL=INFO \
-              ${{ env.IMAGE }}:latest
+            docker tag ${{ env.IMAGE }}:latest task-api:latest
+            docker compose up -d --force-recreate api
             docker logout ghcr.io
