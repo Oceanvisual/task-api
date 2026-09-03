@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 import gradio as gr
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import RedirectResponse
 
 from app.rag.chain import build_rag_chain
 from app.schemas.chat import ChatRequest, ChatResponse, Source
@@ -37,6 +38,11 @@ app = FastAPI(title="RAG service", lifespan=lifespan)
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/")
+def root():
+    return RedirectResponse(url="/ui/")
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -179,10 +185,8 @@ with gr.Blocks(
         with gr.Column(scale=3):
             chatbot = gr.Chatbot(
                 elem_id="chatbot",
-                type="messages",
                 latex_delimiters=LATEX_DELIMITERS,
-                show_copy_button=True,
-                avatar_images=(None, None),
+                buttons=["copy"],
             )
             with gr.Row():
                 msg = gr.Textbox(
@@ -211,4 +215,5 @@ with gr.Blocks(
     send.click(respond, [msg, chatbot], [chatbot, msg, timings_md, sources_md])
 
 
-app = gr.mount_gradio_app(app, demo, path="/")
+demo.queue()
+app = gr.mount_gradio_app(app, demo, path="/ui")

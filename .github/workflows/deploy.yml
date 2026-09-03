@@ -64,7 +64,10 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -e
-            cd /opt/mentoring/rag-service
+            cd /home/user1/rag-service
+            git fetch origin
+            git checkout main
+            git pull --ff-only origin main
 
             # Только секреты. Имя модели, base URL, top_k и т.д.
             # — дефолты из app/config.py.
@@ -76,5 +79,6 @@ jobs:
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             docker pull ${{ env.IMAGE }}:latest
             docker tag ${{ env.IMAGE }}:latest task-api:latest
-            docker compose up -d --force-recreate api
+            docker rm -f task-api 2>/dev/null || true
+            docker compose up -d --force-recreate app
             docker logout ghcr.io
