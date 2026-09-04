@@ -39,6 +39,7 @@ services:
 networks:
   mentoring-net:
     name: mentoring-net
+    external: true
 
 volumes:
   hf-cache:

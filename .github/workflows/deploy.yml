@@ -59,26 +59,29 @@ jobs:
       - name: Deploy to VPS
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.VPS_HOST }}
+          host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -e
-            cd /home/user1/rag-service
+            cd /home/deploy/rag-service
             git fetch origin
             git checkout main
             git pull --ff-only origin main
 
             # Только секреты. Имя модели, base URL, top_k и т.д.
             # — дефолты из app/config.py.
-            cat > .env << EOF
+            cat > .env <<'EOF'
             LLM_API_KEY=${{ secrets.LLM_API_KEY }}
             QDRANT_URL=http://qdrant:6333
             EOF
+            # strip YAML-leading spaces from heredoc body
+            sed -i 's/^[[:space:]]*//' .env
 
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             docker pull ${{ env.IMAGE }}:latest
             docker tag ${{ env.IMAGE }}:latest task-api:latest
             docker rm -f task-api 2>/dev/null || true
-            docker compose up -d --force-recreate app
+            # qdrant уже крутится на mentoring-net — не трогаем
+            docker compose up -d --no-deps --force-recreate app
             docker logout ghcr.io
