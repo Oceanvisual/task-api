@@ -147,6 +147,9 @@ activemq-data/
 # SageMath parsed files
 *.sage.py
 
+# Qdrant local storage
+qdrant_data/
+
 # Environments
 .env
 .envrc
@@ -216,3 +219,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+qdrant_data/
+data/corpus_chunks.jsonl

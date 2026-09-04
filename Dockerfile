@@ -11,7 +11,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Копируем папку app/ внутрь контейнера в /app/app
 COPY app ./app
-COPY models/ ./models/
+COPY data ./data
 
 # Не буферизовать stdout — иначе логи могут "застрять" и не попасть в docker logs
 ENV PYTHONUNBUFFERED=1
