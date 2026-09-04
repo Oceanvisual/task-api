@@ -1,50 +1,63 @@
-# task-api: ML-эндпоинт для классификации вина
+# scikit-learn docs RAG assistant
 
-Сервис на FastAPI + Gradio, который по 13 химическим показателям партии вина определяет сорт винограда (`class_0`, `class_1`, `class_2`). Принимает запросы как через REST (JSON), так и через браузерный Gradio-интерфейс.
+AI-ассистент по официальной документации scikit-learn. Задаёте вопрос
+на естественном языке — получаете ответ с цитатами из документации.
 
-- **Live demo:** https://176-108-248-151.nip.io/
+- **Live demo:** https://176-108-248-151.nip.io/ui/
 - **Swagger UI:** https://176-108-248-151.nip.io/docs
 - **Health-check:** https://176-108-248-151.nip.io/health
-
-## Что внутри
-
-- `wine-train/wine_train_practice.ipynb` + `wine-train/wine_train_solution.ipynb` — обучение `DecisionTreeClassifier` на `sklearn.datasets.load_wine` (label noise 15% в train, `max_depth=4` через `GridSearchCV`). Ноутбуки обучаются отдельно; готовый артефакт копируется в `models/`
-- `app/main.py` — FastAPI с lifespan-загрузкой модели + REST `/predict` + Gradio на `/`
-- `models/wine_model.pkl` — сериализованный `DecisionTreeClassifier` (лежит в git, нужен для CI/Docker)
-- `tests/` — pytest-тесты на REST-эндпоинт и Gradio-роут
-- `Dockerfile` + `.github/workflows/` — CI/CD, автодеплой на VPS через GHCR + SSH
 
 ## Архитектура
 
 ```mermaid
 flowchart LR
-    Browser[Browser] -->|GET /| Gradio[Gradio UI]
-    Client[Programmatic client] -->|POST /predict| REST[FastAPI REST]
-    Gradio --> Model
-    REST --> Model
-    Model[wine_model.pkl]
+    USER[Пользователь] --> NGINX[Nginx HTTPS]
+    NGINX --> APP[FastAPI + Gradio streaming]
+    APP --> EMB[multilingual-e5-small embedder]
+    APP --> Q[(Qdrant)]
+    APP --> LLM[OpenRouter -> llama-3.3-70b-instruct]
 ```
 
-## Как запустить локально
+## Метрики
+
+Замеры на реальной системе (10 вопросов golden-датасета,
+sklearn-модули + about.md, llama-3.3-70b-instruct,
+`notebooks/rag_eval.ipynb`):
+
+| Метрика | Значение | Что измеряет |
+|---|---|---|
+| Recall@4 | **1.00** | retriever возвращает релевантный URL во всех 10 случаях |
+| Faithfulness | **0.92** | LLM-судья: ответ не противоречит контексту |
+| Response Relevancy | **0.83** | LLM-судья: ответ по делу, не уходит в сторону |
+| Avg retrieval | **50 ms** | embed + Qdrant top-4 |
+| Avg LLM (no stream) | **7.0 s** | invoke() через OpenRouter |
+| TTFT (streaming) | **<1 s** | stream(), время до первого токена |
+
+## Локальный запуск
 
 ```bash
-conda create -n task-api python=3.11 -y
-conda activate task-api
-pip install -r requirements.txt
-
-# модель уже в models/wine_model.pkl; при необходимости переобучите ноутбуком
-# и скопируйте: cp wine-train/wine_model.pkl models/
-
-cp .env.example .env   # задай LLM_API_KEY (обязательно)
-uvicorn app.main:app --reload
+cp .env.example .env   # задай LLM_API_KEY
+docker compose up -d qdrant
+docker compose run --rm app sh -c \
+  "python -m app.scripts.load_corpus && python -m app.scripts.index_corpus"
+docker compose up -d app
 ```
 
-Откройте `http://127.0.0.1:8000/` для Gradio, `http://127.0.0.1:8000/docs` для Swagger.
+Откройте http://127.0.0.1:8000/ui/
 
 ## Скриншот
 
-![Gradio-интерфейс](screenshots/gradio-ui.jpg)
+![Gradio UI](screenshots/gradio-ui.png)
+
+## Для резюме
+
+> RAG-сервис над документацией scikit-learn на FastAPI + LangChain
+> LCEL + Qdrant + multilingual-e5-small. Streaming-чат в Gradio
+> (TTFT < 1s через chain.stream), оценка качества через RAGAS на
+> golden-датасете (Recall@4 1.00, Faithfulness 0.92). LLM-провайдер
+> абстрагирован через OpenAI-совместимый endpoint — меняется одной
+> правкой `app/config.py`.
 
 ## Стек
 
-Python 3.11 · FastAPI · Pydantic v2 · scikit-learn 1.6 · Gradio 5 · pytest · Docker · GitHub Actions · GHCR · nginx · Let's Encrypt
+Python 3.11 · FastAPI · Gradio · LangChain · Qdrant · multilingual-e5-small · OpenRouter · Docker · GitHub Actions · nginx
