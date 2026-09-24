@@ -15,7 +15,7 @@ def client():
     mock_chain = MagicMock()
     mock_retriever = MagicMock()
     mock_retriever.invoke.return_value = []
-    with patch("app.main.build_rag_chain", return_value=(mock_chain, mock_retriever)):
+    with patch("app.main.build_rag_pipeline", return_value=(mock_chain, mock_retriever)):
         from app.main import app
 
         with TestClient(app) as c:

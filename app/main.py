@@ -5,10 +5,12 @@ import gradio as gr
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
 
-from app.rag.chain import build_rag_chain
+from app.rag.chain import build_rag_pipeline
 from app.schemas.chat import ChatRequest, ChatResponse, Source
 
-_chain = None
+# answer-цепочка принимает {"question", "docs"}: retrieval делаем один раз
+# и отдаём те же документы и в LLM, и в панель источников.
+_answer_chain = None
 _retriever = None
 
 # LaTeX delimiters для Gradio Chatbot. LLM-ответы про Ridge, Lasso, метрики
@@ -24,11 +26,11 @@ LATEX_DELIMITERS = [
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _chain, _retriever
-    _chain, _retriever = build_rag_chain()
+    global _answer_chain, _retriever
+    _answer_chain, _retriever = build_rag_pipeline()
     print("RAG chain ready")
     yield
-    _chain = None
+    _answer_chain = None
     _retriever = None
 
 
@@ -49,7 +51,7 @@ def root():
 def chat(payload: ChatRequest) -> ChatResponse:
     docs = _retriever.invoke(payload.question)
     try:
-        answer = _chain.invoke(payload.question)
+        answer = _answer_chain.invoke({"question": payload.question, "docs": docs})
     except Exception as exc:
         raise HTTPException(
             status_code=503,
@@ -122,7 +124,7 @@ def respond(message: str, history: list):
     ttft_ms: float | None = None
     accumulated = ""
     try:
-        for chunk in _chain.stream(message):
+        for chunk in _answer_chain.stream({"question": message, "docs": docs}):
             if not chunk:
                 continue
             if ttft_ms is None:
@@ -171,11 +173,11 @@ CSS = """
               padding: 1rem !important; border-left: 1px solid #ddd !important; }
 """
 
+# Gradio 6: theme/css задаются при запуске/монтировании, а не в gr.Blocks(...)
+# (иначе молча игнорируются). См. mount_gradio_app ниже.
 with gr.Blocks(
     title="scikit-learn docs RAG",
-    css=CSS,
     fill_height=True,
-    theme=gr.themes.Soft(),
 ) as demo:
     gr.Markdown(
         "# 📖 scikit-learn docs RAG assistant\n"
@@ -216,4 +218,4 @@ with gr.Blocks(
 
 
 demo.queue()
-app = gr.mount_gradio_app(app, demo, path="/ui")
+app = gr.mount_gradio_app(app, demo, path="/ui", css=CSS, theme=gr.themes.Soft())
