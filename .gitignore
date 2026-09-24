@@ -222,3 +222,6 @@ __marimo__/
 
 qdrant_data/
 data/corpus_chunks.jsonl
+
+# Claude Code (личные настройки)
+.claude/settings.local.json

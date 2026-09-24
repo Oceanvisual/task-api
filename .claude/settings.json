@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/bin/python -m pytest:*)",
+      "Bash(.venv/bin/python -m app.scripts.load_corpus)",
+      "Bash(.venv/bin/python -m app.scripts.index_corpus)",
+      "Bash(uv pip install --python .venv/bin/python:*)",
+      "Bash(uvx ruff:*)",
+      "Bash(docker compose ps:*)",
+      "Bash(docker compose logs:*)",
+      "Bash(docker compose up -d qdrant)",
+      "Bash(docker compose build:*)",
+      "Bash(curl -s http://127.0.0.1:8000/:*)",
+      "Bash(curl -s http://127.0.0.1:6333/:*)"
+    ],
+    "deny": [
+      "Bash(docker compose down -v:*)",
+      "Bash(rm -rf qdrant_data:*)",
+      "Bash(gh workflow run:*)",
+      "Bash(ssh:*)"
+    ]
+  }
+}
