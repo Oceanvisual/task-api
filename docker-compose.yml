@@ -10,6 +10,7 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:-https://openrouter.ai/api/v1}
       LLM_MODEL: ${LLM_MODEL:-meta-llama/llama-3.3-70b-instruct}
       LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.0}
+      LLM_PROXY_URL: ${LLM_PROXY_URL:-}
       QDRANT_URL: http://qdrant:6333
       COLLECTION_NAME: ${COLLECTION_NAME:-sklearn_docs}
       TOP_K: ${TOP_K:-4}

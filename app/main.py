@@ -34,6 +34,43 @@ async def lifespan(app: FastAPI):
     _retriever = None
 
 
+def _provider_error(exc: Exception) -> tuple[int | None, str]:
+    """Достаёт HTTP-статус и текст ошибки провайдера из исключения OpenAI SDK.
+
+    `openai.APIStatusError` (и подклассы вроде PermissionDeniedError) несут
+    `.status_code`, распарсенный `.body` и `.response`. Раньше логировался
+    только тип исключения — тело с реальной причиной (data policy / no credits /
+    model not allowed) терялось. Возвращает (status, message) для логов и ответа.
+    """
+    status = getattr(exc, "status_code", None)
+    message: object = None
+
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        err = body.get("error", body)
+        if isinstance(err, dict):
+            message = err.get("message") or err.get("code")
+        elif isinstance(err, str):
+            message = err
+
+    if not message:
+        response = getattr(exc, "response", None)
+        if response is not None:
+            try:
+                message = response.text
+            except Exception:  # noqa: BLE001 — best-effort извлечение тела
+                message = None
+
+    if not message:
+        message = getattr(exc, "message", None) or str(exc)
+
+    # str() — message из body может быть не-строкой (int-code, dict);
+    # схлопываем переносы (log injection / поломка markdown code-fence)
+    # и обрезаем — тело может быть HTML от WAF на сотни КБ.
+    clean = " ".join(str(message).split())[:300]
+    return status, clean
+
+
 app = FastAPI(title="RAG service", lifespan=lifespan)
 
 
@@ -53,13 +90,19 @@ def chat(payload: ChatRequest) -> ChatResponse:
     try:
         answer = _answer_chain.invoke({"question": payload.question, "docs": docs})
     except Exception as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                f"LLM provider temporarily unavailable. "
-                f"Try again in 30-60 seconds. Raw: {type(exc).__name__}"
-            ),
-        ) from exc
+        status, message = _provider_error(exc)
+        print(
+            f"LLM error in /chat: {type(exc).__name__} status={status} detail={message}"
+        )
+        detail = (
+            "LLM provider temporarily unavailable. Try again in 30-60 seconds. "
+            f"Raw: {type(exc).__name__}"
+        )
+        if status:
+            detail += f" ({status})"
+        if message:
+            detail += f": {message}"
+        raise HTTPException(status_code=503, detail=detail) from exc
     sources = [
         Source(
             url=doc.metadata.get("source", "unknown"),
@@ -70,7 +113,9 @@ def chat(payload: ChatRequest) -> ChatResponse:
     return ChatResponse(answer=answer, sources=sources)
 
 
-def _format_timings(retrieval_ms: float, llm_ms: float | None, llm_error: str | None) -> str:
+def _format_timings(
+    retrieval_ms: float, llm_ms: float | None, llm_error: str | None
+) -> str:
     lines = [
         "### ⏱ Тайминги последнего запроса",
         "",
@@ -100,7 +145,12 @@ def _format_sources(docs: list) -> str:
 def respond(message: str, history: list):
     """Streaming Gradio handler — generator that yields on every chunk."""
     if not message or not message.strip():
-        yield history, "", "### ⏱ Тайминги\n\n_Пустой запрос_", "### 📚 Источники\n\n_—_"
+        yield (
+            history,
+            "",
+            "### ⏱ Тайминги\n\n_Пустой запрос_",
+            "### 📚 Источники\n\n_—_",
+        )
         return
 
     history = history + [{"role": "user", "content": message}]
@@ -113,10 +163,13 @@ def respond(message: str, history: list):
     # Yield #1: sources уже на экране, LLM ещё не начал писать.
     history.append({"role": "assistant", "content": ""})
     yield (
-        history, "",
-        "### ⏱ Тайминги\n\n"
-        f"- 🔍 **Retrieval:** {retrieval_ms:.0f} ms\n"
-        "- 🤖 **LLM:** _streaming…_",
+        history,
+        "",
+        (
+            "### ⏱ Тайминги\n\n"
+            f"- 🔍 **Retrieval:** {retrieval_ms:.0f} ms\n"
+            "- 🤖 **LLM:** _streaming…_"
+        ),
         sources_panel,
     )
 
@@ -132,32 +185,50 @@ def respond(message: str, history: list):
             accumulated += chunk
             history[-1]["content"] = accumulated
             yield (
-                history, "",
-                f"### ⏱ Тайминги\n\n"
-                f"- 🔍 **Retrieval:** {retrieval_ms:.0f} ms\n"
-                f"- ⚡ **TTFT (1st token):** {ttft_ms:.0f} ms\n"
-                f"- 🤖 **LLM:** _streaming… {len(accumulated)} chars_",
+                history,
+                "",
+                (
+                    f"### ⏱ Тайминги\n\n"
+                    f"- 🔍 **Retrieval:** {retrieval_ms:.0f} ms\n"
+                    f"- ⚡ **TTFT (1st token):** {ttft_ms:.0f} ms\n"
+                    f"- 🤖 **LLM:** _streaming… {len(accumulated)} chars_"
+                ),
                 sources_panel,
             )
 
         llm_total_ms = (time.perf_counter() - t1) * 1000
         yield (
-            history, "",
-            "### ⏱ Тайминги последнего запроса\n\n"
-            f"- 🔍 **Retrieval:** {retrieval_ms:.0f} ms\n"
-            f"- ⚡ **TTFT:** {ttft_ms:.0f} ms\n"
-            f"- 🤖 **LLM stream (full):** {llm_total_ms:.0f} ms\n"
-            f"- 📊 **Total:** {retrieval_ms + llm_total_ms:.0f} ms",
+            history,
+            "",
+            (
+                "### ⏱ Тайминги последнего запроса\n\n"
+                f"- 🔍 **Retrieval:** {retrieval_ms:.0f} ms\n"
+                f"- ⚡ **TTFT:** {ttft_ms:.0f} ms\n"
+                f"- 🤖 **LLM stream (full):** {llm_total_ms:.0f} ms\n"
+                f"- 📊 **Total:** {retrieval_ms + llm_total_ms:.0f} ms"
+            ),
             sources_panel,
         )
-    except Exception as exc:
-        history[-1]["content"] = (
-            f"⚠️ LLM-провайдер сейчас недоступен ({type(exc).__name__}). "
-            f"Попробуй через 30-60 секунд."
+    except Exception as exc:  # noqa: BLE001 — любую ошибку провайдера показываем в UI
+        status, message = _provider_error(exc)
+        print(
+            f"LLM error in respond: {type(exc).__name__} "
+            f"status={status} detail={message}"
         )
+        detail = type(exc).__name__
+        if status:
+            detail += f" {status}"
+        content = (
+            f"⚠️ LLM-провайдер сейчас недоступен ({detail}). "
+            "Попробуй через 30-60 секунд."
+        )
+        if message:
+            content += f"\n\n```\n{message}\n```"
+        history[-1]["content"] = content
         yield (
-            history, "",
-            _format_timings(retrieval_ms, None, type(exc).__name__),
+            history,
+            "",
+            _format_timings(retrieval_ms, None, detail),
             sources_panel,
         )
 

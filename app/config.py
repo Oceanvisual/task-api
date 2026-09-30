@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     llm_model: str = "meta-llama/llama-3.3-70b-instruct"
     llm_temperature: float = 0.0
 
+    # Forward-прокси для запросов к LLM-провайдеру (Decodo и т.п.).
+    # Нужен, когда IP сервиса режется geo-WAF провайдера (RU -> OpenRouter 403).
+    # Формат: http://user:pass@host:port. Пусто = ходим напрямую.
+    llm_proxy_url: str = ""
+
     # Vector store
     qdrant_url: str = "http://qdrant:6333"
     collection_name: str = "sklearn_docs"
