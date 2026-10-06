@@ -59,6 +59,8 @@ def test_chat_returns_answer_with_sources(mock_build) -> None:
     assert "Ridge uses L2" in body["answer"]
     assert len(body["sources"]) == 1
     assert "scikit-learn.org" in body["sources"][0]["url"]
+    # полный текст чанка нужен agent_eval (RAGAS retrieved_contexts для baseline)
+    assert body["sources"][0]["full_context"] == "Ridge regression addresses..."
 
 
 @patch("app.main.build_rag_pipeline")

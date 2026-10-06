@@ -16,9 +16,30 @@ from openai import DefaultAsyncHttpxClient, DefaultHttpxClient
 from app.config import settings
 
 
+def _provider_routing() -> dict[str, Any]:
+    """OpenRouter provider-роутинг из settings.
+
+    Пусто -> {} (ничего не передаём, важно для не-OpenRouter провайдеров,
+    где поле `provider` в body вызовет ошибку).
+    """
+    provider: dict[str, Any] = {}
+    ignore = [p.strip() for p in settings.llm_ignore_providers.split(",") if p.strip()]
+    if ignore:
+        provider["ignore"] = ignore
+    if settings.llm_require_param_support:
+        provider["require_parameters"] = True
+    return provider
+
+
 def get_llm() -> ChatOpenAI:
     """Собрать LLM-клиент с параметрами из settings."""
     kwargs: dict[str, Any] = {}
+
+    provider = _provider_routing()
+    if provider:
+        # extra_body уходит в тело запроса к OpenRouter (роутинг по провайдерам).
+        kwargs["extra_body"] = {"provider": provider}
+
     if settings.llm_proxy_url:
         # Прокси-клиенты openai SDK (сохраняют дефолты SDK: limits, timeout,
         # follow_redirects — в отличие от голого httpx.Client). Передаём оба:
