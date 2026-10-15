@@ -25,13 +25,18 @@ uv venv --python 3.11 .venv                                     # как в пр
 uv pip install --python .venv/bin/python --index-strategy unsafe-best-match \
   --only-binary sqlalchemy -r requirements.txt                   # см. примечание ниже
 .venv/bin/python -m pytest -v                                   # тесты (без сети, всё замокано)
-uvx ruff check app tests                                        # линт
+scripts/check.sh                                                # = CI: ruff, format изменённых, mypy-ratchet, pytest (--fast без pytest)
 docker network create mentoring-net 2>/dev/null; docker compose up -d qdrant
 docker compose run --rm app sh -c "python -m app.scripts.load_corpus && python -m app.scripts.index_corpus"
 docker compose up -d app          # http://127.0.0.1:8000/ui/
 ```
 `--index-strategy unsafe-best-match` повторяет поведение pip с `--extra-index-url` (иначе uv берёт `requests` и др. только с индекса torch).
 `--only-binary sqlalchemy`: sdist sqlalchemy 2.1.0 (транзитивно из langchain-community) не собирается.
+
+## Гейты (CI = `.github/workflows/deploy.yml`, локально `scripts/check.sh`)
+- `ruff check` по всему коду; `ruff format --check` только по файлам, изменённым в PR (тронул файл — отформатируй).
+- mypy ratchet: ошибок не больше, чем в `.mypy-baseline`. Починил ошибки → `scripts/mypy-ratchet.sh --update` в том же PR. Поднимать baseline руками нельзя.
+- Деплой только после зелёных `lint` и `test`; `main` защищён, мерж только через PR.
 
 ## Тесты
 - Тесты сервиса патчат `app.main.build_rag_pipeline` (MagicMock answer_chain/retriever). Реальные LLM/Qdrant/HF-модель в тестах запрещены.
@@ -42,5 +47,4 @@ docker compose up -d app          # http://127.0.0.1:8000/ui/
 
 ## Известный техдолг (не чинить попутно без запроса, но учитывать)
 - `chat` и `respond` синхронные; логирование через `print`/stdlib вместо structlog; нет type hints у `lifespan`, `respond`, `chat`-хендлеров.
-- `ci.yml` и `deploy.yml` оба гоняют тесты на PR и push в main (дублирование).
 - `discount_calculator.py`, `app/index_corpus.py` (untracked, дубль `app/scripts/index_corpus.py`) и `wine-train/` к сервису не относятся.

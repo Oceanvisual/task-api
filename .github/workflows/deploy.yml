@@ -1,12 +1,31 @@
 name: CI/CD
 
+# Единственный workflow: PR -> гейты; push в main -> гейты + деплой.
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
+  pull_request:  # любая база: стековые PR тоже проходят гейты
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}  # деплой не прерываем
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+      - name: ruff check
+        run: uvx ruff check --output-format=github app tests
+      - name: ruff format (только изменённые в PR файлы)
+        if: github.event_name == 'pull_request'
+        run: |
+          files=$(git diff --name-only --diff-filter=ACMR "origin/${{ github.base_ref }}...HEAD" -- '*.py')
+          [ -z "$files" ] || uvx ruff format --check $files
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -18,18 +37,28 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt mypy
+
+      - name: mypy (ratchet против .mypy-baseline)
+        run: scripts/mypy-ratchet.sh
 
       - name: Run tests
-        run: pytest tests/ -v
         env:
-          # Только секрет. Остальное (base URL, model, top_k, эмбеддер) —
-          # дефолты из app/config.py, общие для CI / локали / прода.
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          QDRANT_URL: http://localhost:6333
+          # тесты замоканы: реальный ключ не нужен и не должен утекать в PR-джобы
+          LLM_API_KEY: dummy-for-mocked-tests
+          ENABLE_WEB_SEARCH: "false"
+        run: pytest -v
+
+  build:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Docker build (без push)
+        run: docker build -t task-api:${{ github.sha }} .
 
   deploy:
-    needs: test
+    needs: [lint, test]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
