@@ -34,7 +34,7 @@ ragas==0.2.15
 datasets>=3.0.0
 # Агент: версии под langchain-core 0.3.x (0.3.x/1.x требуют core 1.x -> ломают ragas)
 langgraph>=0.2.0,<0.3.0
-langchain-experimental>=0.3.0,<0.4.0
+langchain-experimental>=0.4.2,<0.5.0
 # ddgs (бывш. duckduckgo-search): 7.x+ переименован, DuckDuckGoSearchRun
 # импортирует `from ddgs import DDGS` — без пакета ModuleNotFoundError
 ddgs>=9.0.0
