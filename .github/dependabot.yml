@@ -1,0 +1,25 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: {interval: weekly}
+    groups:
+      actions: {patterns: ["*"]}
+  - package-ecosystem: pip
+    directory: /
+    schedule: {interval: weekly}
+    open-pull-requests-limit: 5
+    ignore:
+      # зафиксированы намеренно (см. CLAUDE.md «Жёсткие ограничения»)
+      # весь langchain/langgraph держится на 0.3.x-линии под ragas 0.2.15 — капы не поднимать
+      - dependency-name: "langchain*"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+      - dependency-name: langgraph
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+      - dependency-name: ragas
+      - dependency-name: gradio
+        update-types: ["version-update:semver-major"]
+      - dependency-name: torch
+  - package-ecosystem: docker
+    directory: /
+    schedule: {interval: monthly}

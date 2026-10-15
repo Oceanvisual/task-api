@@ -11,6 +11,7 @@ FastAPI + Gradio (`/ui`) + LangChain LCEL + Qdrant + `intfloat/multilingual-e5-s
 - `notebooks/rag_eval.ipynb` → `notebooks/rag_metrics.json`: golden-датасет (10 вопросов), Recall@k + RAGAS 0.2.15.
 
 ## Жёсткие ограничения
+Почему они такие — `docs/adr/` (читать перед изменением стека/инфры; новое решение → новый ADR в том же PR).
 - Gradio 6.x: `theme`/`css` передавать в `gr.mount_gradio_app(...)`, не в `gr.Blocks(...)` (там молча игнорируются; есть тест).
 - **Push/merge в `main` = деплой в прод** (`.github/workflows/deploy.yml`: build → GHCR → ssh на VPS). Только через PR из feature-ветки.
 - **Прод и CI на Python 3.11** (Dockerfile, workflows). Не использовать синтаксис 3.12+ (`type X = ...`, PEP 695 generics `def f[T]()`, `@override` из typing и т.п.).
