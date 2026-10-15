@@ -22,7 +22,7 @@ langchain-text-splitters>=0.3.0,<0.4.0
 # pip потянет CUDA-build на 600 МБ ненужных libcudnn/libcufft и т.д.)
 --extra-index-url https://download.pytorch.org/whl/cpu
 
-langchain-huggingface>=0.1.0
+langchain-huggingface>=0.1.2
 langchain-qdrant>=0.2.0
 sentence-transformers>=3.0.0
 qdrant-client>=1.12.0
