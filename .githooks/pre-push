@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# pre-push: тот же гейт, что в CI (scripts/check.sh), + запрет push в main.
+set -euo pipefail
+while read -r _ _ remote_ref _; do
+  if [[ "$remote_ref" == refs/heads/main || "$remote_ref" == refs/heads/master ]]; then
+    echo "pre-push: push в ${remote_ref#refs/heads/} запрещён — только через PR" >&2; exit 1
+  fi
+done
+exec "$(git rev-parse --show-toplevel)/scripts/check.sh"
