@@ -12,6 +12,9 @@ class Source(BaseModel):
 
     url: str
     snippet: str = Field(..., description="First ~200 chars of the chunk")
+    full_context: str = Field(
+        default="", description="Full chunk text (RAGAS retrieved_contexts in eval)"
+    )
 
 
 class ChatResponse(BaseModel):

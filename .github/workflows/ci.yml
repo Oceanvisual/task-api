@@ -20,6 +20,11 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run tests
+        env:
+          # conftest подставляет dummy, но secret даёт реальный ключ, если задан
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY || 'dummy-for-mocked-tests' }}
+          # агент-тесты мокают тулы; флаг страхует от реального выхода в DuckDuckGo
+          ENABLE_WEB_SEARCH: "false"
         run: pytest -v
 
   build-image:

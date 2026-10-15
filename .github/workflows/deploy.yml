@@ -58,10 +58,15 @@ jobs:
 
       - name: Deploy to VPS
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          LLM_PROXY_URL: ${{ secrets.LLM_PROXY_URL }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          # передаём секрет как env-переменную в remote shell, а не текстом в
+          # тело скрипта — спецсимволы в пароле (", $, `) не сломают скрипт
+          envs: LLM_PROXY_URL
           script: |
             set -e
             cd /home/deploy/rag-service
@@ -78,6 +83,14 @@ jobs:
             # strip YAML-leading spaces from heredoc body
             sed -i 's/^[[:space:]]*//' .env
 
+            # Forward-прокси к LLM (обход geo-WAF провайдера для RU-IP VPS).
+            # Пишем только если секрет задан. $ в значении экранируем в $$,
+            # иначе docker compose проинтерпретирует его при чтении .env.
+            if [ -n "${LLM_PROXY_URL:-}" ]; then
+              esc=$(printf '%s' "$LLM_PROXY_URL" | sed 's/\$/$$/g')
+              printf 'LLM_PROXY_URL=%s\n' "$esc" >> .env
+            fi
+
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             docker pull ${{ env.IMAGE }}:latest
             docker tag ${{ env.IMAGE }}:latest task-api:latest
@@ -85,3 +98,8 @@ jobs:
             # qdrant уже крутится на mentoring-net — не трогаем
             docker compose up -d --no-deps --force-recreate app
             docker logout ghcr.io
+
+            # Чистим образ прошлого деплоя (стал <none> после docker pull latest).
+            # После up, чтобы не задеть образ работающего контейнера.
+            # || true — prune не должен ронять уже успешный деплой (set -e).
+            docker image prune -f || true

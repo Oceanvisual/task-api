@@ -1,14 +1,22 @@
 """LCEL-цепочка RAG: retriever → prompt → LLM → parser.
 
-`build_rag_chain()` собирает цепочку из готовых блоков и возвращает её
-вместе с retriever'ом (он отдельно нужен для оценки в Шаге 8).
+`build_rag_pipeline()` возвращает answer-цепочку (принимает уже найденные
+документы) и retriever: сервис делает retrieval один раз и переиспользует
+документы и для ответа, и для панели источников.
+`build_rag_chain()` — полная цепочка `question -> answer` для ноутбука оценки.
 `format_docs_with_sources()` склеивает топ-k чанков в нумерованный
 контекст, чтобы LLM могла цитировать источники как `[1]`, `[2]`.
 """
+
+from operator import itemgetter
+from typing import TypedDict
+
 from langchain_core.documents import Document
+from langchain_core.language_models import LanguageModelLike
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnableLambda, RunnablePassthrough
+from langchain_core.retrievers import BaseRetriever
+from langchain_core.runnables import Runnable, RunnableLambda, RunnablePassthrough
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
@@ -60,20 +68,35 @@ def format_docs_with_sources(docs: list[Document]) -> str:
     return "\n\n---\n\n".join(lines)
 
 
-def build_rag_chain():
-    """Собрать LCEL-цепочку и вернуть пару (chain, retriever)."""
-    vectorstore = get_vectorstore()
-    retriever = vectorstore.as_retriever(search_kwargs={"k": settings.top_k})
-    llm = get_llm()
-    prompt = ChatPromptTemplate.from_template(SYSTEM_PROMPT)
+class AnswerInput(TypedDict):
+    """Вход answer-цепочки: вопрос и уже найденные retriever'ом документы."""
 
-    chain = (
+    question: str
+    docs: list[Document]
+
+
+def build_answer_chain(llm: LanguageModelLike) -> Runnable[AnswerInput, str]:
+    """prompt → LLM → parser поверх готовых документов (без retrieval внутри)."""
+    prompt = ChatPromptTemplate.from_template(SYSTEM_PROMPT)
+    return (
         {
-            "context": retriever | RunnableLambda(format_docs_with_sources),
-            "question": RunnablePassthrough(),
+            "context": itemgetter("docs") | RunnableLambda(format_docs_with_sources),
+            "question": itemgetter("question"),
         }
         | prompt
         | llm
         | StrOutputParser()
     )
+
+
+def build_rag_pipeline() -> tuple[Runnable[AnswerInput, str], BaseRetriever]:
+    """Вернуть (answer_chain, retriever): retrieval делает вызывающий код, один раз."""
+    retriever = get_vectorstore().as_retriever(search_kwargs={"k": settings.top_k})
+    return build_answer_chain(get_llm()), retriever
+
+
+def build_rag_chain() -> tuple[Runnable[str, str], BaseRetriever]:
+    """Полная цепочка `question -> answer` + retriever (для notebooks/rag_eval.ipynb)."""
+    answer_chain, retriever = build_rag_pipeline()
+    chain = {"question": RunnablePassthrough(), "docs": retriever} | answer_chain
     return chain, retriever

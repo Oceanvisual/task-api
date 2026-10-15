@@ -10,12 +10,23 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:-https://openrouter.ai/api/v1}
       LLM_MODEL: ${LLM_MODEL:-meta-llama/llama-3.3-70b-instruct}
       LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.0}
+      LLM_PROXY_URL: ${LLM_PROXY_URL:-}
+      LLM_IGNORE_PROVIDERS: ${LLM_IGNORE_PROVIDERS:-DeepInfra}
+      LLM_REQUIRE_PARAM_SUPPORT: ${LLM_REQUIRE_PARAM_SUPPORT:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_JSON: ${LOG_JSON:-true}
       QDRANT_URL: http://qdrant:6333
       COLLECTION_NAME: ${COLLECTION_NAME:-sklearn_docs}
       TOP_K: ${TOP_K:-4}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-small}
       EMBEDDING_DIM: ${EMBEDDING_DIM:-384}
       NORMALIZE_EMBEDDINGS: ${NORMALIZE_EMBEDDINGS:-true}
+      # Agent (LangGraph)
+      MAX_ITERATIONS: ${MAX_ITERATIONS:-5}
+      AGENT_TEMPERATURE: ${AGENT_TEMPERATURE:-0.0}
+      ENABLE_WEB_SEARCH: ${ENABLE_WEB_SEARCH:-true}
+      ENABLE_PYTHON_REPL: ${ENABLE_PYTHON_REPL:-false}
+      AGENT_MAX_OUTPUT_CHARS: ${AGENT_MAX_OUTPUT_CHARS:-2000}
     volumes:
       - ./data:/app/data
       - hf-cache:/root/.cache/huggingface
