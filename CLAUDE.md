@@ -13,7 +13,7 @@ FastAPI + Gradio (`/ui`) + LangChain LCEL + Qdrant + `intfloat/multilingual-e5-s
 ## Жёсткие ограничения
 Почему они такие — `docs/adr/` (читать перед изменением стека/инфры; новое решение → новый ADR в том же PR).
 - Gradio 6.x: `theme`/`css` передавать в `gr.mount_gradio_app(...)`, не в `gr.Blocks(...)` (там молча игнорируются; есть тест).
-- **Push/merge в `main` = деплой в прод** (`.github/workflows/deploy.yml`: build → GHCR → ssh на VPS). Только через PR из feature-ветки.
+- **Push/merge в `main` = деплой в прод** (когда `DEPLOY_ENABLED=true`) (`.github/workflows/deploy.yml`: build → GHCR → ssh на VPS). Только через PR из feature-ветки.
 - **Прод и CI на Python 3.11** (Dockerfile, workflows). Не использовать синтаксис 3.12+ (`type X = ...`, PEP 695 generics `def f[T]()`, `@override` из typing и т.п.).
 - **Зависимости: `requirements.txt`** (источник правды для Docker и CI; pyproject без deps). Torch ставится CPU-only через `--extra-index-url`, это не ломать. `langchain-community<0.4` и `ragas==0.2.15` зафиксированы намеренно.
 - `Settings.llm_api_key` обязателен: без него падает импорт `app.config`. Тесты ставят dummy в `tests/conftest.py`.
@@ -22,6 +22,7 @@ FastAPI + Gradio (`/ui`) + LangChain LCEL + Qdrant + `intfloat/multilingual-e5-s
 ## Команды
 Локально (пока нет миграции на uv-проект, глобальное правило «только uv» здесь адаптировано):
 ```bash
+scripts/setup-dev.sh                                            # один раз: .venv 3.11 + deps + mypy + git-хуки (.githooks)
 uv venv --python 3.11 .venv                                     # как в проде
 uv pip install --python .venv/bin/python --index-strategy unsafe-best-match \
   --only-binary sqlalchemy -r requirements.txt                   # см. примечание ниже
@@ -37,7 +38,8 @@ docker compose up -d app          # http://127.0.0.1:8000/ui/
 ## Гейты (CI = `.github/workflows/deploy.yml`, локально `scripts/check.sh`)
 - `ruff check` по всему коду; `ruff format --check` только по файлам, изменённым в PR (тронул файл — отформатируй).
 - mypy ratchet: ошибок не больше, чем в `.mypy-baseline`. Починил ошибки → `scripts/mypy-ratchet.sh --update` в том же PR. Поднимать baseline руками нельзя.
-- Деплой только после зелёных `lint` и `test`; `main` защищён, мерж только через PR.
+- Деплой только после зелёных `lint` и `test` и только при `vars.DEPLOY_ENABLED=true` (сейчас VPS нет — выключен); мерж только через PR.
+- Локально те же гейты: `.githooks/pre-commit` (запрет коммита в main, ruff по staged) и `pre-push` (`scripts/check.sh`).
 
 ## Тесты
 - Тесты сервиса патчат `app.main.build_rag_pipeline` (MagicMock answer_chain/retriever). Реальные LLM/Qdrant/HF-модель в тестах запрещены.

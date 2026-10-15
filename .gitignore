@@ -225,3 +225,6 @@ data/corpus_chunks.jsonl
 
 # Claude Code (личные настройки)
 .claude/settings.local.json
+
+# артефакты Playwright MCP
+.playwright-mcp/

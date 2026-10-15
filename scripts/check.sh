@@ -7,9 +7,10 @@ export PATH="$PWD/.venv/bin:$PATH" LLM_API_KEY="${LLM_API_KEY:-dummy-for-mocked-
 
 echo "▶ ruff check";  uvx ruff check app tests
 base=$(git merge-base HEAD origin/main 2>/dev/null || echo HEAD)
-files=$( { git diff --name-only --diff-filter=ACMR "$base" -- '*.py'; git ls-files --others --exclude-standard -- '*.py'; } | sort -u)
-echo "▶ ruff format --check (изменённые: $(echo "$files" | grep -c . || true))"
-[[ -z "$files" ]] || uvx ruff format --check $files
+files=()  # без mapfile: на macOS системный bash 3.2
+while IFS= read -r f; do files+=("$f"); done < <( { git diff --name-only --diff-filter=ACMR "$base" -- '*.py'; git ls-files --others --exclude-standard -- '*.py'; } | sort -u)
+echo "▶ ruff format --check (изменённые: ${#files[@]})"
+(( ${#files[@]} == 0 )) || uvx ruff format --check "${files[@]}"
 command -v mypy >/dev/null || uv pip install -q --python .venv/bin/python mypy
 echo "▶ mypy ratchet"; scripts/mypy-ratchet.sh
 [[ "${1:-}" == "--fast" ]] && exit 0
