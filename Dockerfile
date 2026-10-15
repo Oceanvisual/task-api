@@ -1,5 +1,5 @@
 # Базовый образ: Python 3.11 в минимальной (slim) редакции
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 # Внутри контейнера работаем из /app — как `cd /app` в терминале
 WORKDIR /app
