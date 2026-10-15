@@ -132,3 +132,11 @@ jobs:
             # После up, чтобы не задеть образ работающего контейнера.
             # || true — prune не должен ронять уже успешный деплой (set -e).
             docker image prune -f || true
+
+            # Smoke-check: деплой успешен, только если сервис ответил на /health (до 90 с на прогрев модели).
+            for i in $(seq 1 18); do
+              if curl -fsS -m 5 http://127.0.0.1:8000/health >/dev/null 2>&1 || wget -q -T 5 -O /dev/null http://127.0.0.1:8000/health; then echo "health ok (попытка $i)"; exit 0; fi
+              sleep 5
+            done
+            echo "::error::/health не ответил за 90 с"; docker logs --tail 80 task-api 2>&1 || docker compose logs --tail 80 app
+            exit 1
