@@ -1,6 +1,6 @@
 # task-api: RAG-ассистент по документации scikit-learn
 
-FastAPI + Gradio (`/ui`) + LangChain LCEL + Qdrant + `intfloat/multilingual-e5-small` + LLM через OpenRouter (OpenAI-совместимый API, `ChatOpenAI`). Прод: VPS за nginx, https://176-108-248-151.nip.io.
+FastAPI + Gradio (`/ui`) + LangChain LCEL + Qdrant + `intfloat/multilingual-e5-small` + LLM через OpenRouter (OpenAI-совместимый API, `ChatOpenAI`). Прода сейчас нет (VPS выключен 2026-10-15); деплой включается `vars.DEPLOY_ENABLED=true`.
 
 ## Карта кода
 - `app/main.py`: FastAPI (`/health`, `POST /chat`), Gradio UI со streaming (`respond`), lifespan собирает `_answer_chain`/`_retriever`. Retrieval делается один раз на запрос, docs идут и в LLM, и в sources.
@@ -38,15 +38,15 @@ docker compose up -d app          # http://127.0.0.1:8000/ui/
 ## Гейты (CI = `.github/workflows/deploy.yml`, локально `scripts/check.sh`)
 - `ruff check` по всему коду; `ruff format --check` только по файлам, изменённым в PR (тронул файл — отформатируй).
 - mypy ratchet: ошибок не больше, чем в `.mypy-baseline`. Починил ошибки → `scripts/mypy-ratchet.sh --update` в том же PR. Поднимать baseline руками нельзя.
-- Деплой только после зелёных `lint` и `test` и только при `vars.DEPLOY_ENABLED=true` (сейчас VPS нет — выключен); мерж только через PR.
-- Локально те же гейты: `.githooks/pre-commit` (запрет коммита в main, ruff по staged) и `pre-push` (`scripts/check.sh`).
+- Деплой только после зелёных `lint` и `test` и только при `vars.DEPLOY_ENABLED=true` (сейчас VPS нет — выключен). `main` под branch protection (PR + зелёные `lint`/`test`, `enforce_admins`): прямой push отклоняет GitHub.
+- Локально те же гейты: `.githooks/pre-commit` (запрет коммита в main, ruff по staged) и `pre-push` (`scripts/check.sh`). Ветка, отставшая от main без `.githooks/`, работает без них — `git merge origin/main`.
 
 ## Тесты
 - Тесты сервиса патчат `app.main.build_rag_pipeline` (MagicMock answer_chain/retriever). Реальные LLM/Qdrant/HF-модель в тестах запрещены.
 - Цепочки в `chain.py` тестировать с fake LLM (`RunnableLambda`, запоминающий prompt) и замоканными `get_vectorstore`/`get_llm`; см. `tests/test_rag_chain.py`.
 
 ## Изменения RAG (промпт, chunking, top_k, эмбеддер, модель)
-После любого такого изменения прогнать `/rag-eval` и сравнить с `notebooks/rag_metrics.json`. Регрессия Recall@4 или Faithfulness означает, что изменение не мержим без обсуждения. Метрики в README обновлять из JSON (сейчас README и JSON расходятся).
+Eval в этом репо — `/rag-eval` (notebook); глобальный `/eval` и каталог `evals/` не разворачивать без ADR. После любого такого изменения прогнать `/rag-eval` и сравнить с `notebooks/rag_metrics.json`. Регрессия Recall@4 или Faithfulness означает, что изменение не мержим без обсуждения. Метрики в README обновлять из JSON (сейчас README и JSON расходятся).
 
 ## Известный техдолг (не чинить попутно без запроса, но учитывать)
 - `chat` и `respond` синхронные; логирование через `print`/stdlib вместо structlog; нет type hints у `lifespan`, `respond`, `chat`-хендлеров.
